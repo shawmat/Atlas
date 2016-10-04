@@ -11,6 +11,7 @@ Built-in providers:
 - url template (UrlTemplate)
 - mbtiles (TileStache.MBTiles.Provider)
 - mapnik grid (Mapnik.GridProvider)
+- atlas (TileStache.Atlas.Provider)
 
 Example built-in provider, for JSON configuration file:
 
@@ -133,6 +134,10 @@ def getProviderByName(name):
     elif name.lower() == 'sandwich':
         from . import Sandwich
         return Sandwich.Provider
+        
+    elif name.lower() == 'atlas':
+        from . import Atlas
+        return Atlas.Provider        
 
     raise Exception('Unknown provider name: "%s"' % name)
 

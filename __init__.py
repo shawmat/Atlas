@@ -46,9 +46,10 @@ import Config
 
 # regular expression for PATH_INFO
 _pathinfo_pat = re.compile(r'^/?(?P<l>\w.+)/(?P<z>\d+)/(?P<x>-?\d+)/(?P<y>-?\d+)\.(?P<e>\w+)$')
+_pathinfo_pat_atlas = re.compile(r'^/?(?P<l>\w.+)/(?P<s>\w.+)/(?P<p>\d+)/(?P<z>\d+)/(?P<x>-?\d+)/(?P<y>-?\d+)\.(?P<e>\w+)$')
 _preview_pat = re.compile(r'^/?(?P<l>\w.+)/(preview\.html)?$')
 
-def getTile(layer, coord, extension, ignore_cached=False):
+def getTile(layer, coord, extension, series, page, ignore_cached=False):
     ''' Get a type string and tile binary for a given request layer tile.
     
         This function is documented as part of TileStache's public API:
@@ -63,7 +64,7 @@ def getTile(layer, coord, extension, ignore_cached=False):
         This is the main entry point, after site configuration has been loaded
         and individual tiles need to be rendered.
     '''
-    status_code, headers, body = layer.getTileResponse(coord, extension, ignore_cached)
+    status_code, headers, body = layer.getTileResponse(coord, extension, series, page, ignore_cached)
     mime = headers.get('Content-Type')
 
     return mime, body
@@ -113,12 +114,19 @@ def splitPathInfo(pathinfo):
     """
     if pathinfo == '/':
         return None, None, None
+
+    if _pathinfo_pat_atlas.match(pathinfo or ''):
+        path = _pathinfo_pat_atlas.match(pathinfo)
+        layer, series, page, row, column, zoom, extension = [path.group(p) for p in 'lspyxze']
+        coord = Coordinate(int(row), int(column), int(zoom)) 
     
-    if _pathinfo_pat.match(pathinfo or ''):
+    elif _pathinfo_pat.match(pathinfo or ''):
         path = _pathinfo_pat.match(pathinfo)
         layer, row, column, zoom, extension = [path.group(p) for p in 'lyxze']
-        coord = Coordinate(int(row), int(column), int(zoom))
-
+        series = ''
+        page = 0
+        coord = Coordinate(int(row), int(column), int(zoom))       
+        
     elif _preview_pat.match(pathinfo or ''):
         path = _preview_pat.match(pathinfo)
         layer, extension = path.group('l'), 'html'
@@ -127,7 +135,7 @@ def splitPathInfo(pathinfo):
     else:
         raise Core.KnownUnknown('Bad path: "%s". I was expecting something more like "/example/0/0/0.png"' % pathinfo)
 
-    return layer, coord, extension
+    return layer, coord, extension, series, page
 
 def mergePathInfo(layer, coord, extension):
     """ Converts layer name, coordinate and extension back to a PATH_INFO string.
@@ -231,7 +239,7 @@ def requestHandler2(config_hint, path_info, query_string=None, script_name=''):
             mimetype, content = getattr(layer.config, 'index', ('text/plain', 'TileStache says hello.'))
             return 200, Headers([('Content-Type', mimetype)]), content
 
-        coord, extension = splitPathInfo(path_info)[1:]
+        coord, extension, series, page = splitPathInfo(path_info)[1:]
         
         if extension == 'html' and coord is None:
             status_code, headers, content = getPreview(layer)
@@ -251,7 +259,7 @@ def requestHandler2(config_hint, path_info, query_string=None, script_name=''):
             return 302, headers, 'You are being redirected to %s\n' % redirect_uri
         
         else:
-            status_code, headers, content = layer.getTileResponse(coord, extension)
+            status_code, headers, content = layer.getTileResponse(coord, extension, series, page)
 
         if layer.allowed_origin:
             headers.setdefault('Access-Control-Allow-Origin', layer.allowed_origin)
@@ -362,8 +370,8 @@ class WSGITileServer:
             except Exception, e:
                 raise Core.KnownUnknown("Error loading Tilestache config file:\n%s" % str(e))
 
-        try:
-            layer, coord, ext = splitPathInfo(environ['PATH_INFO'])
+        try:       
+            layer, coord, ext, series, page = splitPathInfo(environ['PATH_INFO'])                 
         except Core.KnownUnknown, e:
             return self._response(start_response, 400, str(e))
 

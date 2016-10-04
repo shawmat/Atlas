@@ -164,6 +164,7 @@ def _addRecentTile(layer, coord, format, body, age=300):
     """ Add the body of a tile to _recent_tiles with a timeout.
     """
     key = (layer, coord, format)
+
     due = time() + age
     
     _recent_tiles['hash'][key] = body, due
@@ -172,20 +173,22 @@ def _addRecentTile(layer, coord, format, body, age=300):
     logging.debug('TileStache.Core._addRecentTile() added tile to recent tiles: %s', key)
     
     # now look at the oldest keys and remove them if needed
-    cutoff = 0
-    for i, (key, due_by) in enumerate(_recent_tiles['list']):
+    for (key, due_by) in _recent_tiles['list']:
         # new enough?
         if time() < due_by:
-            cutoff = i
             break
         
         logging.debug('TileStache.Core._addRecentTile() removed tile from recent tiles: %s', key)
         
         try:
+            _recent_tiles['list'].remove((key, due_by))
+        except ValueError:
+            pass
+        
+        try:
             del _recent_tiles['hash'][key]
         except KeyError:
             pass
-    del _recent_tiles['list'][:cutoff]
 
 def _getRecentTile(layer, coord, format):
     """ Return the body of a recent tile, or None if it's not there.
@@ -251,7 +254,7 @@ class Metatile:
         
         # upper-left corner of coord's metatile
         row = rows * (int(coord.row) / rows)
-        column = columns * (int(coord.column) / columns)
+        column = columns * (int(coord.column) / columns)      
         
         coords = []
         
@@ -350,13 +353,13 @@ class Layer:
             Layer names are stored in the Configuration object, so
             config.layers must be inspected to find a matching name.
         """
-        for (name, layer) in self.config.layers.items():
+        for (name, layer) in self.config.layers.items():           
             if layer is self:
                 return name
 
         return None
 
-    def getTileResponse(self, coord, extension, ignore_cached=False):
+    def getTileResponse(self, coord, extension, series, page, ignore_cached=False):
         """ Get status code, headers, and a tile binary for a given request layer tile.
         
             Arguments:
@@ -419,13 +422,12 @@ class Layer:
                     # No one else wrote the tile, do it here.
                     buff = StringIO()
 
-                    try:
-                        tile = self.render(coord, format)
+                    try:                    
+                        tile = self.render(coord, format, series, page)
                         save = True
                     except NoTileLeftBehind, e:
                         tile = e.tile
                         save = False
-                        status_code = 404
 
                     if not self.write_cache:
                         save = False
@@ -468,7 +470,7 @@ class Layer:
         """
         return self.metatile.isForReal() and hasattr(self.provider, 'renderArea')
     
-    def render(self, coord, format):
+    def render(self, coord, format, series, page):
         """ Render a tile for a coordinate, return PIL Image-like object.
         
             Perform metatile slicing here as well, if required, writing the
@@ -507,7 +509,10 @@ class Layer:
         elif hasattr(provider, 'renderTile'):
             # draw a single tile
             width, height = self.dim, self.dim
-            tile = provider.renderTile(width, height, srs, coord)
+            if series == '':
+              tile = provider.renderTile(width, height, srs, coord)
+            else:
+              tile = provider.renderTile(width, height, srs, coord, series, page)
 
         else:
             raise KnownUnknown('Your provider lacks renderTile and renderArea methods.')
